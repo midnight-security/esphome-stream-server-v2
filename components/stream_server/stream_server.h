@@ -39,7 +39,12 @@ public:
 
     void set_port(uint16_t port) { this->port_ = port; }
 	int get_client_count() { return this->clients_.size(); }
-	
+
+    // Close every connected client socket. Used both by the framework's
+    // on_shutdown() hook and by the OTA pre-flight in air-alarm-common, so
+    // OTA traffic does not contend with high-throughput streaming.
+    void disconnect_all();
+
 protected:
     void accept();
     void cleanup();
@@ -58,4 +63,11 @@ protected:
     std::unique_ptr<esphome::socket::Socket> socket_{};
     uint16_t port_{6638};
     std::vector<Client> clients_{};
+
+    // Overflow tracking. RX backlog warns when the UART RX buffer is filling
+    // faster than we drain (rate-limited 1/s); tcp write loss aggregates short
+    // / failed socket writes and reports the byte total every 5s.
+    uint32_t rx_backlog_last_log_ms_{0};
+    uint32_t tcp_write_lost_bytes_{0};
+    uint32_t tcp_write_last_log_ms_{0};
 };
