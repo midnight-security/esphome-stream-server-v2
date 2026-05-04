@@ -57,8 +57,15 @@ void StreamServerComponent::setup() {
     this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
     this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
   
-    this->socket_->bind(reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(struct sockaddr_in));
-    this->socket_->listen(8);
+    int bind_rc = this->socket_->bind(reinterpret_cast<struct sockaddr *>(&bind_addr),
+                                       sizeof(struct sockaddr_in));
+    if (bind_rc < 0)
+        ESP_LOGE(TAG, "Port %u: bind() failed errno=%d", this->port_, errno);
+    int listen_rc = this->socket_->listen(8);
+    if (listen_rc < 0)
+        ESP_LOGE(TAG, "Port %u: listen() failed errno=%d", this->port_, errno);
+    else
+        ESP_LOGCONFIG(TAG, "Port %u: listening", this->port_);
 
 #ifdef USE_OTA_STATE_CALLBACK
     // Drop streaming clients as soon as ANY OTA platform begins so the
@@ -82,16 +89,46 @@ void StreamServerComponent::loop() {
     this->read();
     this->write();
     this->cleanup();
+
+    // Periodic state summary — fires every 30s per port. Surfaces sustained
+    // conditions (no clients ever connect, byte counters not advancing,
+    // cumulative loss creeping up) that the per-event WARNs can hide.
+    uint32_t now = millis();
+    if ((now - this->stats_last_log_ms_) >= 30000) {
+        ESP_LOGI(TAG,
+                 "Port %u stats: clients=%d accepted_total=%u rx=%llu tx=%llu lost_total=%llu",
+                 this->port_, (int) this->clients_.size(),
+                 (unsigned) this->accepted_total_,
+                 (unsigned long long) this->bytes_rx_total_,
+                 (unsigned long long) this->bytes_tx_total_,
+                 (unsigned long long) this->bytes_lost_total_);
+        this->stats_last_log_ms_ = now;
+    }
 }
 
 void StreamServerComponent::accept() {
     struct sockaddr_in client_addr;
     socklen_t client_addrlen = sizeof(struct sockaddr_in);
     std::unique_ptr<socket::Socket> socket = this->socket_->accept(reinterpret_cast<struct sockaddr *>(&client_addr), &client_addrlen);
-    if (!socket)
+    if (!socket) {
+        // accept() returns nullptr both for "no pending connection"
+        // (errno EAGAIN/EWOULDBLOCK, expected on most loop iterations) and
+        // for real errors (e.g. ECONNABORTED if a peer SYN'd then RST'd
+        // before we accepted, or EMFILE if we're out of FDs). Rate-limit
+        // the real-error log so a stuck accept loop cannot flood.
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            uint32_t now = millis();
+            if ((now - this->accept_fail_last_log_ms_) >= 1000) {
+                ESP_LOGW(TAG, "Port %u: accept() failed errno=%d",
+                         this->port_, errno);
+                this->accept_fail_last_log_ms_ = now;
+            }
+        }
         return;
+    }
 
     socket->setblocking(false);
+    this->accepted_total_++;
 
     // TCP keepalive — detect a peer that vanished during quiet periods.
     // Without keepalive, lwIP only notices a dead peer when it tries to send
@@ -142,6 +179,7 @@ void StreamServerComponent::read() {
         char buf[1460];
         len = std::min(len, (int) sizeof(buf));
         this->stream_->read_array(reinterpret_cast<uint8_t*>(buf), len);
+        this->bytes_rx_total_ += (uint64_t) len;
         for (Client &client : this->clients_) {
             if (client.disconnected)
                 continue;
@@ -151,6 +189,7 @@ void StreamServerComponent::read() {
                 // TCP path. Aggregate so a flood of losses does not flood logs.
                 int lost = (written < 0) ? len : (len - (int) written);
                 this->tcp_write_lost_bytes_ += lost;
+                this->bytes_lost_total_ += (uint64_t) lost;
                 // Distinguish transient back-pressure (EAGAIN/EWOULDBLOCK)
                 // from a dead peer (EPIPE / ECONNRESET / ENOTCONN / EBADF).
                 // Without this, a closed client socket would never be marked
@@ -181,6 +220,7 @@ void StreamServerComponent::write() {
     for (Client &client : this->clients_) {
         while ((len = client.socket->read(&buf, sizeof(buf))) > 0){
             this->stream_->write_array(buf, len);
+            this->bytes_tx_total_ += (uint64_t) len;
 		}
         if (len == 0) {
             ESP_LOGI(TAG, "Port %u: client %s disconnected (%d remaining)",
