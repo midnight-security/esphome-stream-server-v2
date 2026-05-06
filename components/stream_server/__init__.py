@@ -15,8 +15,9 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import automation
 from esphome.components import uart
-from esphome.const import CONF_ID, CONF_PORT
+from esphome.const import CONF_DURATION, CONF_ID, CONF_PORT
 from esphome.util import parse_esphome_version
 
 # ESPHome doesn't know the Stream abstraction yet, so hardcode to use a UART for now.
@@ -29,6 +30,7 @@ MULTI_CONF = True
 
 ns = cg.global_ns
 StreamServerComponent = ns.class_("StreamServerComponent", cg.Component)
+SendBreakAction = ns.class_("StreamServerSendBreakAction", automation.Action)
 
 CONFIG_SCHEMA = (
 	cv.Schema(
@@ -48,6 +50,24 @@ def to_code(config):
 
 	yield cg.register_component(var, config)
 	yield uart.register_uart_device(var, config)
+
+
+# stream_server.send_break: <stream_server_id>, duration: <time>
+# Asserts a UART break (TX line LOW) for the given duration. The action
+# returns immediately; restore is scheduled via Component::set_timeout.
+SEND_BREAK_SCHEMA = cv.Schema({
+	cv.GenerateID(): cv.use_id(StreamServerComponent),
+	cv.Required(CONF_DURATION): cv.positive_time_period_milliseconds,
+})
+
+
+@automation.register_action("stream_server.send_break", SendBreakAction, SEND_BREAK_SCHEMA)
+def send_break_to_code(config, action_id, template_arg, args):
+	paren = yield cg.get_variable(config[CONF_ID])
+	var = cg.new_Pvariable(action_id, template_arg)
+	yield cg.register_parented(var, paren)
+	cg.add(var.set_duration(config[CONF_DURATION].total_milliseconds))
+	yield var
 
 esphome_version = parse_esphome_version()
 

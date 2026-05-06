@@ -32,6 +32,12 @@
 #include "esphome/components/ota/ota_backend.h"
 #endif
 
+// IDFUARTComponent::get_hw_serial_number() exposes the underlying ESP-IDF
+// uart_port_t, which we need for uart_set_line_inverse() / uart_wait_tx_done().
+#ifdef USE_ESP_IDF
+#include "esphome/components/uart/uart_component_esp_idf.h"
+#endif
+
 static const char *TAG = "streamserver";
 
 using namespace esphome;
@@ -251,6 +257,36 @@ void StreamServerComponent::disconnect_all() {
         client.socket->shutdown(SHUT_RDWR);
         client.disconnected = true;   // cleanup() removes on next loop()
     }
+}
+
+void StreamServerComponent::send_break(uint32_t duration_ms) {
+#ifdef USE_ESP_IDF
+    auto *idf = static_cast<uart::IDFUARTComponent *>(this->stream_);
+    uart_port_t uart_num = (uart_port_t) idf->get_hw_serial_number();
+    uint16_t port = this->port_;
+
+    ESP_LOGI(TAG, "Port %u: send_break asserting LOW on UART_NUM_%d for %ums",
+             port, (int) uart_num, (unsigned) duration_ms);
+
+    // Drain in-flight TX so the break starts cleanly. 50ms upper bound — an
+    // already-idle TX returns immediately.
+    uart_wait_tx_done(uart_num, pdMS_TO_TICKS(50));
+
+    // Invert TX → idle-HIGH becomes LOW = continuous break condition until
+    // the inversion is disabled.
+    uart_set_line_inverse(uart_num, UART_SIGNAL_TXD_INV);
+
+    // Schedule restore via the Component scheduler so the main loop is not
+    // parked for the break duration. Capture by value (uart_num + port) —
+    // the lambda may outlive the immediate call frame.
+    this->set_timeout("send_break_restore", duration_ms, [uart_num, port]() {
+        uart_set_line_inverse(uart_num, UART_SIGNAL_INV_DISABLE);
+        ESP_LOGI(TAG, "Port %u: send_break restored UART_NUM_%d", port, (int) uart_num);
+    });
+#else
+    ESP_LOGW(TAG, "Port %u: send_break is only implemented on ESP-IDF (no-op)",
+             this->port_);
+#endif
 }
 
 void StreamServerComponent::on_shutdown() {

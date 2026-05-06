@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/socket/socket.h"
 #include "esphome/components/uart/uart.h"
 
@@ -44,6 +46,13 @@ public:
     // on_shutdown() hook and by the OTA pre-flight in air-alarm-common, so
     // OTA traffic does not contend with high-throughput streaming.
     void disconnect_all();
+
+    // Drive the configured UART's TX line LOW for `duration_ms` to generate
+    // a break condition on the wire (ESP-IDF only). Asserts immediately and
+    // schedules the restore via Component::set_timeout, so the call returns
+    // promptly and the main loop is not parked for the break duration.
+    // No-op on non-ESP-IDF builds.
+    void send_break(uint32_t duration_ms);
 
 protected:
     void accept();
@@ -80,4 +89,22 @@ protected:
     uint64_t bytes_lost_total_{0};     // cumulative TCP write loss
     uint32_t stats_last_log_ms_{0};
     uint32_t accept_fail_last_log_ms_{0};
+};
+
+// stream_server.send_break: <id>, duration: <time>
+// Wraps StreamServerComponent::send_break() so it is invocable from any
+// ESPHome automation. duration is captured at codegen time as a fixed
+// uint32_t millisecond value (not templatable) — keeps the action shape
+// minimal and matches typical break-generation use cases.
+template<typename... Ts>
+class StreamServerSendBreakAction : public esphome::Action<Ts...>,
+                                    public esphome::Parented<StreamServerComponent> {
+ public:
+    void set_duration(uint32_t duration_ms) { this->duration_ms_ = duration_ms; }
+    void play(Ts... x) override {
+        this->parent_->send_break(this->duration_ms_);
+    }
+
+ protected:
+    uint32_t duration_ms_{0};
 };
