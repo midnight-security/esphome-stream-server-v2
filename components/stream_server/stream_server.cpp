@@ -265,7 +265,10 @@ void StreamServerComponent::send_break(uint32_t duration_ms) {
     uart_port_t uart_num = (uart_port_t) idf->get_hw_serial_number();
     uint16_t port = this->port_;
 
-    ESP_LOGI(TAG, "Port %u: send_break asserting LOW on UART_NUM_%d for %ums",
+    // WARN level so these events propagate to MQTT log via the consumer's
+    // logger.on_message forward (e.g. air-alarm-common's WARN+ filter).
+    // send_break is intentionally rare — bumping these does not risk log spam.
+    ESP_LOGW(TAG, "Port %u: send_break asserting LOW on UART_NUM_%d for %ums",
              port, (int) uart_num, (unsigned) duration_ms);
 
     // Drain in-flight TX so the break starts cleanly. 50ms upper bound — an
@@ -281,7 +284,7 @@ void StreamServerComponent::send_break(uint32_t duration_ms) {
     // the lambda may outlive the immediate call frame.
     this->set_timeout("send_break_restore", duration_ms, [uart_num, port]() {
         uart_set_line_inverse(uart_num, UART_SIGNAL_INV_DISABLE);
-        ESP_LOGI(TAG, "Port %u: send_break restored UART_NUM_%d", port, (int) uart_num);
+        ESP_LOGW(TAG, "Port %u: send_break restored UART_NUM_%d", port, (int) uart_num);
     });
 #else
     ESP_LOGW(TAG, "Port %u: send_break is only implemented on ESP-IDF (no-op)",
