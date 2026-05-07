@@ -32,11 +32,21 @@ ns = cg.global_ns
 StreamServerComponent = ns.class_("StreamServerComponent", cg.Component)
 SendBreakAction = ns.class_("StreamServerSendBreakAction", automation.Action)
 
+CONF_TCP_SEND_BUFFER_SIZE = "tcp_send_buffer_size"
+
 CONFIG_SCHEMA = (
 	cv.Schema(
 		{
 			cv.GenerateID(): cv.declare_id(StreamServerComponent),
 			cv.Optional(CONF_PORT): cv.port,
+			# Per-port override of the lwIP TCP send buffer cap. 0 / unset
+			# falls back to CONFIG_LWIP_TCP_SND_BUF_DEFAULT. Max is 65535
+			# without window scaling (16-bit TCP window field). Requires
+			# CONFIG_LWIP_SO_SNDBUF=y in sdkconfig (off by default in
+			# ESP-IDF).
+			cv.Optional(CONF_TCP_SEND_BUFFER_SIZE): cv.int_range(
+				min=2048, max=65535
+			),
 		}
 	)
 		.extend(cv.COMPONENT_SCHEMA)
@@ -47,6 +57,8 @@ def to_code(config):
 	var = cg.new_Pvariable(config[CONF_ID])
 	if CONF_PORT in config:
 		cg.add(var.set_port(config[CONF_PORT]))
+	if CONF_TCP_SEND_BUFFER_SIZE in config:
+		cg.add(var.set_tcp_send_buffer_size(config[CONF_TCP_SEND_BUFFER_SIZE]))
 
 	yield cg.register_component(var, config)
 	yield uart.register_uart_device(var, config)

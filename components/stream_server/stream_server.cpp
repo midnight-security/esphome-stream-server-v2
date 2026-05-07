@@ -121,6 +121,21 @@ void StreamServerComponent::accept() {
     socket->setblocking(false);
     this->accepted_total_++;
 
+    // Per-port TCP send-buffer override, if configured (0 = leave at the
+    // CONFIG_LWIP_TCP_SND_BUF_DEFAULT compile-time default). Useful for a
+    // single high-throughput port without raising the device-wide default
+    // and risking memory pressure on idle sockets.
+    if (this->tcp_send_buffer_size_ > 0) {
+        int sndbuf = (int) this->tcp_send_buffer_size_;
+        if (socket->setsockopt(SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+            ESP_LOGW(TAG, "Port %u: setsockopt(SO_SNDBUF=%d) failed errno=%d",
+                     this->port_, sndbuf, errno);
+        } else {
+            ESP_LOGI(TAG, "Port %u: client SO_SNDBUF set to %d bytes",
+                     this->port_, sndbuf);
+        }
+    }
+
     // TCP keepalive — detect a peer that vanished during quiet periods.
     // Without keepalive, lwIP only notices a dead peer when it tries to send
     // and gets no ACK, which can take minutes; meanwhile our writes succeed

@@ -40,6 +40,7 @@ public:
     float get_setup_priority() const override { return esphome::setup_priority::AFTER_WIFI; }
 
     void set_port(uint16_t port) { this->port_ = port; }
+    void set_tcp_send_buffer_size(uint32_t bytes) { this->tcp_send_buffer_size_ = bytes; }
 	int get_client_count() { return this->clients_.size(); }
 
     // Close every connected client socket. Used both by the framework's
@@ -71,6 +72,11 @@ protected:
     esphome::uart::UARTComponent *stream_{nullptr};
     std::unique_ptr<esphome::socket::Socket> socket_{};
     uint16_t port_{6638};
+    // 0 = use the system default (CONFIG_LWIP_TCP_SND_BUF_DEFAULT). When
+    // non-zero, accepted client sockets get setsockopt(SO_SNDBUF, ...)
+    // so this port can absorb larger bursts without affecting other
+    // sockets on the device. Requires CONFIG_LWIP_SO_SNDBUF=y.
+    uint32_t tcp_send_buffer_size_{0};
     std::vector<Client> clients_{};
 
     // Overflow tracking. RX backlog warns when the UART RX buffer is filling
