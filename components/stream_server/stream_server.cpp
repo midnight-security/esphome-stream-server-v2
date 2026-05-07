@@ -136,7 +136,10 @@ void StreamServerComponent::accept() {
 
     std::string identifier = inet_ntoa(client_addr.sin_addr);
     this->clients_.emplace_back(std::move(socket), identifier);
-    ESP_LOGI(TAG, "Port %u: client connected from %s (%d total)",
+    // WARN level so the lifecycle event reaches MQTT via the consumer's
+    // logger.on_message WARN+ forwarder. Once-per-client event — no
+    // log-spam risk.
+    ESP_LOGW(TAG, "Port %u: client connected from %s (%d total)",
              this->port_, identifier.c_str(), (int) this->clients_.size());
 }
 
@@ -216,8 +219,9 @@ void StreamServerComponent::write() {
             this->bytes_tx_total_ += (uint64_t) len;
 		}
         if (len == 0) {
-            // Clean FIN from peer
-            ESP_LOGI(TAG, "Port %u: client %s disconnected (%d remaining)",
+            // Clean FIN from peer. WARN level for MQTT visibility, same
+            // rationale as the connect log in accept().
+            ESP_LOGW(TAG, "Port %u: client %s disconnected (%d remaining)",
                      this->port_, client.identifier.c_str(),
                      (int) this->clients_.size() - 1);
             client.disconnected = true;
