@@ -80,14 +80,13 @@ protected:
     uint32_t tcp_write_lost_bytes_{0};
     uint32_t tcp_write_last_log_ms_{0};
 
-    // Lifetime counters since boot — surfaced via the 30s stats line in
-    // loop() so a sustained issue (no connects, slow leak of lost bytes,
-    // accept errors) is visible without per-event spam.
+    // Lifetime counters since boot — kept ticking so a future caller can
+    // query them, but not periodically logged (the per-event WARNs are
+    // sufficient and the periodic line was log noise on quiet ports).
     uint32_t accepted_total_{0};
     uint64_t bytes_rx_total_{0};       // UART -> TCP direction
     uint64_t bytes_tx_total_{0};       // TCP -> UART direction
     uint64_t bytes_lost_total_{0};     // cumulative TCP write loss
-    uint32_t stats_last_log_ms_{0};
     uint32_t accept_fail_last_log_ms_{0};
 };
 

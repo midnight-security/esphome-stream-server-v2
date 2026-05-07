@@ -95,21 +95,6 @@ void StreamServerComponent::loop() {
     this->read();
     this->write();
     this->cleanup();
-
-    // Periodic state summary — fires every 30s per port. Surfaces sustained
-    // conditions (no clients ever connect, byte counters not advancing,
-    // cumulative loss creeping up) that the per-event WARNs can hide.
-    uint32_t now = millis();
-    if ((now - this->stats_last_log_ms_) >= 30000) {
-        ESP_LOGI(TAG,
-                 "Port %u stats: clients=%d accepted_total=%u rx=%llu tx=%llu lost_total=%llu",
-                 this->port_, (int) this->clients_.size(),
-                 (unsigned) this->accepted_total_,
-                 (unsigned long long) this->bytes_rx_total_,
-                 (unsigned long long) this->bytes_tx_total_,
-                 (unsigned long long) this->bytes_lost_total_);
-        this->stats_last_log_ms_ = now;
-    }
 }
 
 void StreamServerComponent::accept() {
