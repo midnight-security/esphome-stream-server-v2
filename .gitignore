@@ -1,0 +1,3 @@
+# ESPHome's Python codegen creates __pycache__ next to the component
+# files at build time. Local-only artefact; not part of the component.
+__pycache__/
