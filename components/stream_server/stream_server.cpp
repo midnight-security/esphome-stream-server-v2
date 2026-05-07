@@ -209,16 +209,26 @@ void StreamServerComponent::write() {
     uint8_t buf[1460];
     ssize_t len;
     for (Client &client : this->clients_) {
+        if (client.disconnected)
+            continue;
         while ((len = client.socket->read(&buf, sizeof(buf))) > 0){
             this->stream_->write_array(buf, len);
             this->bytes_tx_total_ += (uint64_t) len;
 		}
         if (len == 0) {
+            // Clean FIN from peer
             ESP_LOGI(TAG, "Port %u: client %s disconnected (%d remaining)",
                      this->port_, client.identifier.c_str(),
                      (int) this->clients_.size() - 1);
             client.disconnected = true;
-            continue;
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            // Non-transient read error — peer died. Surface at WARN so the
+            // MQTT log forwarder picks it up, and mark the client dead so
+            // cleanup() removes it. Symmetric to the write-loss handling
+            // in read().
+            ESP_LOGW(TAG, "Port %u: read from %s failed (errno=%d) — marking dead",
+                     this->port_, client.identifier.c_str(), errno);
+            client.disconnected = true;
         }
     }
 }
