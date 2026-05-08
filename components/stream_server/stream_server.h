@@ -67,6 +67,17 @@ protected:
     void read();
     void write();
 
+#ifdef USE_ESP_IDF
+    // Dedicated FreeRTOS task that drives accept/read/write/cleanup off the
+    // ESPHome main loop. Pends on the ESP-IDF UART event queue with a 5ms
+    // timeout — UART RX wakes the task immediately, the timeout services
+    // accept and TCP-RX events that the queue doesn't signal.
+    static void task_loop(void *arg);
+    // Mutex protects clients_ between the I/O task and OTA-state-callback
+    // / on_shutdown invocations of disconnect_all from main loop context.
+    SemaphoreHandle_t clients_mutex_{nullptr};
+#endif
+
     struct Client {
         Client(std::unique_ptr<esphome::socket::Socket> socket, std::string identifier);
 

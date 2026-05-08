@@ -73,6 +73,20 @@ void StreamServerComponent::setup() {
     else
         ESP_LOGCONFIG(TAG, "Port %u: listening", this->port_);
 
+#ifdef USE_ESP_IDF
+    // Move accept/read/write/cleanup off the ESPHome main loop. The
+    // dedicated task pends on the ESP-IDF UART RX event queue so the
+    // moment the driver delivers RX data we wake and forward it — no
+    // dependency on the main-loop cadence (which can stall for hundreds
+    // of ms when other components do heavy work). Priority 4 on core 1:
+    // above loopTask (1) so we are not held up; below esphome_mqtt (5),
+    // RedLedTask (6), and ENS220 (8) so their guarantees are preserved.
+    this->clients_mutex_ = xSemaphoreCreateMutex();
+    xTaskCreatePinnedToCore(&StreamServerComponent::task_loop,
+                            "stream_srv", 4096, this, 4, nullptr, 1);
+    ESP_LOGCONFIG(TAG, "Port %u: I/O task spawned (core 1, priority 4)", this->port_);
+#endif
+
 #ifdef USE_OTA_STATE_CALLBACK
     // Drop streaming clients as soon as ANY OTA platform begins so the
     // high-throughput UART→TCP path stops contending with the OTA transfer
@@ -91,11 +105,50 @@ void StreamServerComponent::setup() {
 }
 
 void StreamServerComponent::loop() {
+#ifndef USE_ESP_IDF
+    // Arduino fallback path — ESP-IDF runs this work in the dedicated
+    // task spawned by setup() instead, off the ESPHome main loop.
     this->accept();
     this->read();
     this->write();
     this->cleanup();
+#endif
 }
+
+#ifdef USE_ESP_IDF
+void StreamServerComponent::task_loop(void *arg) {
+    auto *self = static_cast<StreamServerComponent *>(arg);
+    auto *idf = static_cast<uart::IDFUARTComponent *>(self->stream_);
+    QueueHandle_t uart_q = (idf != nullptr) ? *idf->get_uart_event_queue() : nullptr;
+
+    ESP_LOGI(TAG, "Port %u: I/O task running, uart_event_queue=%s",
+             self->port_, (uart_q != nullptr) ? "ready" : "missing (using poll fallback)");
+
+    while (true) {
+        // Pend on UART RX events. The driver pushes uart_event_t entries
+        // when bytes arrive (or break / frame-error). 5ms timeout services
+        // socket events the UART queue doesn't signal — incoming connects,
+        // TCP-side reads, peer-initiated disconnects.
+        if (uart_q != nullptr) {
+            uart_event_t event;
+            xQueueReceive(uart_q, &event, pdMS_TO_TICKS(5));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+
+        // Mutex around the client-touching work. disconnect_all() (called
+        // from the OTA state callback and from on_shutdown, both in main
+        // loop context) and clear_buffers() take the same mutex.
+        if (xSemaphoreTake(self->clients_mutex_, portMAX_DELAY) != pdTRUE)
+            continue;
+        self->accept();
+        self->read();
+        self->write();
+        self->cleanup();
+        xSemaphoreGive(self->clients_mutex_);
+    }
+}
+#endif
 
 void StreamServerComponent::accept() {
     struct sockaddr_in client_addr;
@@ -250,12 +303,25 @@ void StreamServerComponent::dump_config() {
 }
 
 void StreamServerComponent::disconnect_all() {
+#ifdef USE_ESP_IDF
+    // Serialize with the I/O task (which holds clients_mutex_ for the
+    // duration of each iteration). Mutex may be null during very early
+    // boot (before setup() runs) — disconnect is a no-op then anyway.
+    if (this->clients_mutex_ != nullptr) {
+        xSemaphoreTake(this->clients_mutex_, portMAX_DELAY);
+    }
+#endif
     for (Client &client : this->clients_) {
         if (client.disconnected)
             continue;
         client.socket->shutdown(SHUT_RDWR);
         client.disconnected = true;   // cleanup() removes on next loop()
     }
+#ifdef USE_ESP_IDF
+    if (this->clients_mutex_ != nullptr) {
+        xSemaphoreGive(this->clients_mutex_);
+    }
+#endif
 }
 
 void StreamServerComponent::clear_buffers() {
