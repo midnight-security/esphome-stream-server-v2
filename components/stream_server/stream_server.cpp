@@ -258,6 +258,27 @@ void StreamServerComponent::disconnect_all() {
     }
 }
 
+void StreamServerComponent::clear_buffers() {
+    int n_clients = (int) this->clients_.size();
+    ESP_LOGW(TAG, "Port %u: clear_buffers — disconnecting %d client(s) and flushing UART RX",
+             this->port_, n_clients);
+
+    // Drop every connected client. lwIP discards each socket's queued send
+    // buffer on close, so any pre-call bytes already enqueued for transmit
+    // never reach the host. The host will reconnect and see only data
+    // produced after this call.
+    this->disconnect_all();
+
+#ifdef USE_ESP_IDF
+    // Flush the ESP-IDF UART RX buffer — anything the peer sent before the
+    // call (including residual data from a pre-reset peer state) is
+    // discarded so it does not get forwarded to the next client.
+    auto *idf = static_cast<uart::IDFUARTComponent *>(this->stream_);
+    uart_port_t uart_num = (uart_port_t) idf->get_hw_serial_number();
+    uart_flush_input(uart_num);
+#endif
+}
+
 void StreamServerComponent::send_break(uint32_t duration_ms) {
 #ifdef USE_ESP_IDF
     auto *idf = static_cast<uart::IDFUARTComponent *>(this->stream_);

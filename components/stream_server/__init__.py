@@ -31,6 +31,7 @@ MULTI_CONF = True
 ns = cg.global_ns
 StreamServerComponent = ns.class_("StreamServerComponent", cg.Component)
 SendBreakAction = ns.class_("StreamServerSendBreakAction", automation.Action)
+ClearBuffersAction = ns.class_("StreamServerClearBuffersAction", automation.Action)
 
 CONFIG_SCHEMA = (
 	cv.Schema(
@@ -67,6 +68,21 @@ def send_break_to_code(config, action_id, template_arg, args):
 	var = cg.new_Pvariable(action_id, template_arg)
 	yield cg.register_parented(var, paren)
 	cg.add(var.set_duration(config[CONF_DURATION].total_milliseconds))
+	yield var
+
+
+# stream_server.clear_buffers: <stream_server_id>
+# Disconnects every connected client and flushes the UART RX buffer.
+CLEAR_BUFFERS_SCHEMA = cv.Schema({
+	cv.GenerateID(): cv.use_id(StreamServerComponent),
+})
+
+
+@automation.register_action("stream_server.clear_buffers", ClearBuffersAction, CLEAR_BUFFERS_SCHEMA)
+def clear_buffers_to_code(config, action_id, template_arg, args):
+	paren = yield cg.get_variable(config[CONF_ID])
+	var = cg.new_Pvariable(action_id, template_arg)
+	yield cg.register_parented(var, paren)
 	yield var
 
 esphome_version = parse_esphome_version()

@@ -54,6 +54,13 @@ public:
     // No-op on non-ESP-IDF builds.
     void send_break(uint32_t duration_ms);
 
+    // Drop every connected client (lwIP discards each socket's queued send
+    // buffer on close) and flush the UART RX buffer so any pre-call bytes
+    // still queued by the ESP-IDF UART driver are discarded. Used to give
+    // the peer (after a reset signal, etc.) a fresh post-flush stream when
+    // it reconnects, with no lingering pre-flush bytes prefixed.
+    void clear_buffers();
+
 protected:
     void accept();
     void cleanup();
@@ -106,4 +113,16 @@ class StreamServerSendBreakAction : public esphome::Action<Ts...>,
 
  protected:
     uint32_t duration_ms_{0};
+};
+
+// stream_server.clear_buffers: <id>
+// Drops every connected client and flushes the UART RX buffer. See
+// StreamServerComponent::clear_buffers() for the full rationale.
+template<typename... Ts>
+class StreamServerClearBuffersAction : public esphome::Action<Ts...>,
+                                       public esphome::Parented<StreamServerComponent> {
+ public:
+    void play(Ts... x) override {
+        this->parent_->clear_buffers();
+    }
 };
