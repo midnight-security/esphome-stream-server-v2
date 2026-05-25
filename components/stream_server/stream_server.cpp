@@ -42,6 +42,21 @@ static const char *TAG = "streamserver";
 
 using namespace esphome;
 
+// Port of the slow control UART (115200 baud). Hex-dump logging is gated on
+// this port so the 921600-baud data port stays quiet. Debug aid for the EVM
+// firmware-load issue — flip HEXDUMP_ENABLED to true to turn it on.
+static constexpr bool HEXDUMP_ENABLED = false;
+static constexpr uint16_t HEXDUMP_PORT = 6638;
+static constexpr int HEXDUMP_MAX = 40;
+
+static std::string hex_dump_truncated(const uint8_t *data, int len) {
+    int show = (len > HEXDUMP_MAX) ? HEXDUMP_MAX : len;
+    std::string s = format_hex_pretty(data, (size_t) show, ' ', false);
+    if (len > HEXDUMP_MAX)
+        s += " ...";
+    return s;
+}
+
 void StreamServerComponent::setup() {
     ESP_LOGCONFIG(TAG, "Setting up stream server...");
 
@@ -227,6 +242,10 @@ void StreamServerComponent::read() {
         len = std::min(len, (int) sizeof(buf));
         this->stream_->read_array(reinterpret_cast<uint8_t*>(buf), len);
         this->bytes_rx_total_ += (uint64_t) len;
+        if (HEXDUMP_ENABLED && this->port_ == HEXDUMP_PORT) {
+            ESP_LOGI(TAG, "Port %u RX %dB: %s", this->port_, len,
+                     hex_dump_truncated(reinterpret_cast<const uint8_t*>(buf), len).c_str());
+        }
         for (Client &client : this->clients_) {
             if (client.disconnected)
                 continue;
@@ -268,6 +287,10 @@ void StreamServerComponent::write() {
         if (client.disconnected)
             continue;
         while ((len = client.socket->read(&buf, sizeof(buf))) > 0){
+            if (HEXDUMP_ENABLED && this->port_ == HEXDUMP_PORT) {
+                ESP_LOGI(TAG, "Port %u TX %dB: %s", this->port_, (int) len,
+                         hex_dump_truncated(buf, (int) len).c_str());
+            }
             this->stream_->write_array(buf, len);
             this->bytes_tx_total_ += (uint64_t) len;
 		}
