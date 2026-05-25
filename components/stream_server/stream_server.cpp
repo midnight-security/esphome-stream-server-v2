@@ -202,6 +202,16 @@ void StreamServerComponent::accept() {
     socket->setsockopt(IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
     socket->setsockopt(IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
 
+    // Disable Nagle on the 115200-baud slow-control port. Host writes are
+    // small interactive commands — coalescing them costs up to ~200ms while
+    // Nagle waits for an outstanding ACK. The 921600-baud data port keeps
+    // Nagle on; its segments are full-MSS anyway and the extra coalescing
+    // helps with WiFi airtime.
+    if (this->port_ == 6638) {
+        int nodelay = 1;
+        socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+    }
+
     std::string identifier = inet_ntoa(client_addr.sin_addr);
     this->clients_.emplace_back(std::move(socket), identifier);
     // WARN level so the lifecycle event reaches MQTT via the consumer's
