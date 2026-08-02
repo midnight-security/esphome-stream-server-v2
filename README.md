@@ -20,7 +20,7 @@ Requires ESPHome v2021.10 or higher.
 
 ```yaml
 external_components:
-  - source: github://tube0013/esphome-stream-server-v2
+  - source: github://midnight-security/esphome-stream-server-v2
 
 stream_server:
 ```
