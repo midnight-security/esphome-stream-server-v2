@@ -26,6 +26,7 @@
 // TCP_KEEPIDLE / TCP_KEEPINTVL / TCP_KEEPCNT live in lwip/tcp.h on ESP-IDF.
 // errno is needed for dead-socket detection in read().
 #include <errno.h>
+#include <inttypes.h>
 #include <lwip/sockets.h>
 
 #ifdef USE_OTA_STATE_CALLBACK
@@ -316,7 +317,7 @@ void StreamServerComponent::read() {
     // Periodic flush of accumulated TCP write loss
     if (this->tcp_write_lost_bytes_ > 0 &&
         (now - this->tcp_write_last_log_ms_) >= 5000) {
-        ESP_LOGW(TAG, "Port %u: TCP write loss %u bytes in last 5s",
+        ESP_LOGW(TAG, "Port %u: TCP write loss %" PRIu32 " bytes in last 5s",
                  this->port_, this->tcp_write_lost_bytes_);
         this->tcp_write_lost_bytes_ = 0;
         this->tcp_write_last_log_ms_ = now;
