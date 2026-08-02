@@ -212,6 +212,40 @@ void StreamServerComponent::accept() {
         socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     }
 
+    // Single-client takeover on the slow-control port (6638). RS-232 control
+    // protocols like the Monoprice amp are single-master: the relay broadcasts
+    // UART RX to every client and merges every client's TX onto the one line,
+    // so a second concurrent client corrupts the exchange. When a host (e.g.
+    // pymonoprice) reconnects after a blip, its previous session is frequently
+    // still half-open here and would otherwise linger until keepalive reaps it
+    // (~45s) — during which reads/writes cross-talk and, under churn, sockets
+    // accumulate until accept() starts failing and the device needs a power
+    // cycle. So the newest connection wins: drop any existing client(s) and
+    // flush the UART RX buffer, giving the new client a clean, exclusive
+    // channel. The high-throughput data port (6639) keeps multi-client relay.
+    //
+    // NB: we inline the shutdown+cleanup rather than calling disconnect_all()/
+    // clear_buffers(), which take clients_mutex_ — accept() already runs under
+    // that mutex (see task_loop), and it is not recursive.
+    if (this->port_ == 6638 && !this->clients_.empty()) {
+        ESP_LOGW(TAG, "Port %u: client %s takes over — dropping %d stale client(s)",
+                 this->port_, inet_ntoa(client_addr.sin_addr),
+                 (int) this->clients_.size());
+        for (Client &client : this->clients_) {
+            if (client.disconnected)
+                continue;
+            client.socket->shutdown(SHUT_RDWR);
+            client.disconnected = true;
+        }
+        this->cleanup();
+#ifdef USE_ESP_IDF
+        // Drop any bytes the amp sent to the previous session so the new
+        // client does not inherit a stale/partial response as a prefix.
+        auto *idf = static_cast<uart::IDFUARTComponent *>(this->stream_);
+        uart_flush_input((uart_port_t) idf->get_hw_serial_number());
+#endif
+    }
+
     std::string identifier = inet_ntoa(client_addr.sin_addr);
     this->clients_.emplace_back(std::move(socket), identifier);
     // WARN level so the lifecycle event reaches MQTT via the consumer's
