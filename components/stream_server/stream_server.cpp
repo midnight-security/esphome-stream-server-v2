@@ -176,7 +176,7 @@ void StreamServerComponent::accept() {
         // before we accepted, or EMFILE if we're out of FDs). Rate-limit
         // the real-error log so a stuck accept loop cannot flood.
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            uint32_t now = millis();
+            uint32_t now = esphome::millis();
             if ((now - this->accept_fail_last_log_ms_) >= 1000) {
                 ESP_LOGW(TAG, "Port %u: accept() failed errno=%d",
                          this->port_, errno);
@@ -267,7 +267,7 @@ void StreamServerComponent::read() {
     // imminent risk of being dropped by the ESP-IDF UART driver.
     static const int RX_BACKLOG_WARN = 4096;
 
-    uint32_t now = millis();
+    uint32_t now = esphome::millis();
     int initial_avail = this->stream_->available();
     if (initial_avail >= RX_BACKLOG_WARN &&
         (now - this->rx_backlog_last_log_ms_) >= 1000) {
