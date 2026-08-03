@@ -132,10 +132,30 @@ void StreamServerComponent::loop() {
 }
 
 #ifdef USE_ESP_IDF
+namespace {
+// Some ESPHome forks expose the ESP-IDF UART driver's RX event queue via
+// IDFUARTComponent::get_uart_event_queue(), letting the I/O task pend on RX
+// events for minimum latency. Stock ESPHome has no such method, so detect it
+// at compile time (SFINAE) and fall back to a fixed 5ms poll when it is absent
+// — the component then builds against both. The poll path is more than enough
+// for the slow-control bridge; the event-queue path only helps the high-rate
+// (e.g. 921600-baud) data port.
+template<typename T>
+auto uart_event_queue_or_null(T *idf, int)
+    -> decltype(idf->get_uart_event_queue(), (QueueHandle_t) nullptr) {
+  auto *q = (idf != nullptr) ? idf->get_uart_event_queue() : nullptr;
+  return (q != nullptr) ? *q : nullptr;
+}
+template<typename T>
+QueueHandle_t uart_event_queue_or_null(T * /*idf*/, long) {
+  return nullptr;
+}
+}  // namespace
+
 void StreamServerComponent::task_loop(void *arg) {
     auto *self = static_cast<StreamServerComponent *>(arg);
     auto *idf = static_cast<uart::IDFUARTComponent *>(self->stream_);
-    QueueHandle_t uart_q = (idf != nullptr) ? *idf->get_uart_event_queue() : nullptr;
+    QueueHandle_t uart_q = uart_event_queue_or_null(idf, 0);
 
     ESP_LOGI(TAG, "Port %u: I/O task running, uart_event_queue=%s",
              self->port_, (uart_q != nullptr) ? "ready" : "missing (using poll fallback)");
